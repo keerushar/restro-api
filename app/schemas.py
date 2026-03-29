@@ -1,97 +1,121 @@
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
+from enum import Enum
+
+
+# --- Enums ---
+
+class OrderStatus(str, Enum):
+    pending = "pending"
+    completed = "completed"
+
+
+class ItemStatus(str, Enum):
+    ordered = "ordered"
+    placed = "placed"
+    cancelled = "cancelled"
+
+
+class PayType(str, Enum):
+    cash = "cash"
+    qr = "qr"
+
 
 # --- Auth ---
+
 class UserCreate(BaseModel):
+    name: str
     username: str
     password: str
     role: str
+    # required when superadmin creates a staff directly (to assign them to an admin)
+    admin_id: Optional[int] = None
+
 
 class Token(BaseModel):
     access_token: str
     token_type: str
 
+
 class UserResponse(BaseModel):
     id: int
+    name: str
     username: str
     role: str
-    
+    admin_id: Optional[int] = None
+
     class Config:
         from_attributes = True
+
 
 # --- Floor & Table ---
-class TableBase(BaseModel):
-    table_number: str
-    capacity: int
 
-class TableCreate(TableBase):
-    floor_id: int
+class TableCreate(BaseModel):
+    table_number: int
+    table_name: str
+
 
 class TableUpdate(BaseModel):
-    table_number: Optional[str] = None
-    capacity: Optional[int] = None
-    floor_id: Optional[int] = None
+    table_number: Optional[int] = None
+    table_name: Optional[str] = None
 
-class TableResponse(TableBase):
+
+class TableResponse(BaseModel):
     id: int
-    floor_id: int
-    
+    table_number: int
+    table_name: str
+
     class Config:
         from_attributes = True
+
 
 class FloorCreate(BaseModel):
     name: str
 
+
 class FloorUpdate(BaseModel):
     name: Optional[str] = None
+
 
 class FloorResponse(BaseModel):
     id: int
     name: str
-    tables: List[TableResponse] = []
-    
+
     class Config:
         from_attributes = True
+
 
 # --- Menu ---
-class CategoryCreate(BaseModel):
-    name: str
 
-class CategoryUpdate(BaseModel):
-    name: Optional[str] = None
-
-class CategoryResponse(BaseModel):
-    id: int
-    name: str
-    
-    class Config:
-        from_attributes = True
-
-class MenuItemBase(BaseModel):
+class MenuItemCreate(BaseModel):
     name: str
     price: float
-    category_id: int
     is_available: bool = True
 
-class MenuItemCreate(MenuItemBase):
-    pass
 
 class MenuItemUpdate(BaseModel):
     name: Optional[str] = None
     price: Optional[float] = None
-    category_id: Optional[int] = None
     is_available: Optional[bool] = None
 
-class MenuItemResponse(MenuItemBase):
+
+class MenuItemResponse(BaseModel):
     id: int
-    
+    name: str
+    price: float
+    is_available: bool
+
     class Config:
         from_attributes = True
+
+
+# --- Item Requests ---
 
 class ItemRequestCreate(BaseModel):
     item_name: str
     description: str
+
 
 class ItemRequestResponse(BaseModel):
     id: int
@@ -99,50 +123,155 @@ class ItemRequestResponse(BaseModel):
     item_name: str
     description: str
     request_count: int
-    
+
     class Config:
         from_attributes = True
 
-# --- Reservation ---
+
+# --- Reservations ---
+
 class ReservationCreate(BaseModel):
     table_id: int
     customer_name: str
     start_time: datetime
     end_time: datetime
 
+
 class ReservationResponse(ReservationCreate):
     id: int
-    
+
     class Config:
         from_attributes = True
 
-# --- Order ---
+
+# --- Orders ---
+
 class OrderItemCreate(BaseModel):
     menu_item_id: int
-    quantity: int
+    quantity: int = 1
+
+
+class OrderItemStatusUpdate(BaseModel):
+    status: ItemStatus
+
 
 class OrderItemResponse(BaseModel):
     id: int
-    menu_item_id: int
+    menu_item_id: Optional[int] = None
+    name: str
+    price: float
     quantity: int
-    
+    status: ItemStatus
+
     class Config:
         from_attributes = True
+
 
 class OrderCreate(BaseModel):
     table_id: int
     items: List[OrderItemCreate]
 
+
+class AddItemsToOrder(BaseModel):
+    items: List[OrderItemCreate]
+
+
 class OrderStatusUpdate(BaseModel):
-    status: str  # pending, completed, cancelled
+    status: OrderStatus
+
 
 class OrderResponse(BaseModel):
     id: int
     table_id: int
-    staff_id: Optional[int]
-    status: str
-    created_at: datetime
-    items: List[OrderItemResponse] = []
-    
+    table_number: int
+    table_name: str
+    staff_id: Optional[int] = None
+    status: OrderStatus
+    total_amount: float
+    ordered_items: List[OrderItemResponse] = []
+    placed_items: List[OrderItemResponse] = []
+    cancelled_items: List[OrderItemResponse] = []
+    created_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
+
+
+# --- Table Transfer ---
+
+class TableTransferRequest(BaseModel):
+    target_table_id: int
+
+
+# --- History ---
+
+class OrderHistoryResponse(BaseModel):
+    id: int
+    order_id: int
+    event_type: str
+    description: Optional[str] = None
+    actor_id: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# --- Bill ---
+
+class PayRequest(BaseModel):
+    pay_type: PayType
+
+
+class BillItemResponse(BaseModel):
+    name: str
+    quantity: int
+    unit_price: float
+    amount: float  # quantity * unit_price
+
+
+class BillResponse(BaseModel):
+    id: int
+    order_id: int
+    table_number: int
+    table_name: str
+    items: List[BillItemResponse]
+    total_amount: float
+    is_paid: bool
+    pay_type: Optional[PayType] = None
+    generated_at: datetime
+    paid_at: Optional[datetime] = None
+
+
+class DailySalesResponse(BaseModel):
+    date: str
+    total_sales: float
+    total_orders: int
+    cash_total: float
+    qr_total: float
+    bills: List[BillResponse]
+
+
+# --- Revenue Analytics ---
+
+class RevenueDataPoint(BaseModel):
+    label: str        # "14:00", "Mon", "15" etc.
+    total_sales: float
+    total_orders: int
+    cash_total: float
+    qr_total: float
+
+
+class RevenuePeriod(BaseModel):
+    total_sales: float
+    total_orders: int
+    cash_total: float
+    qr_total: float
+    breakdown: List[RevenueDataPoint]
+
+
+class RevenueAnalyticsResponse(BaseModel):
+    day: RevenuePeriod    # today, hourly breakdown
+    week: RevenuePeriod   # last 7 days, daily breakdown
+    month: RevenuePeriod  # current month, daily breakdown
+    year: RevenuePeriod   # current year, monthly breakdown
