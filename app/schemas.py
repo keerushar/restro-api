@@ -22,15 +22,61 @@ class PayType(str, Enum):
     qr = "qr"
 
 
+# --- Cafe ---
+
+class CafeAdminCreate(BaseModel):
+    """Admin account to create alongside the cafe."""
+    name: str
+    username: str
+    password: str
+
+
+class CafeCreate(BaseModel):
+    """Create a cafe and its admin in one request."""
+    cafe_name: str
+    cafe_username: str
+    admin: CafeAdminCreate
+
+
+class CafeResponse(BaseModel):
+    id: str
+    name: str
+    username: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CafeStatusUpdate(BaseModel):
+    is_active: bool
+
+
+class CafeWithAdminResponse(BaseModel):
+    cafe: CafeResponse
+    admin: "UserResponse"
+
+
+# --- Staff ---
+
+class StaffCreate(BaseModel):
+    """Create a staff account directly under the calling cafe_admin's cafe."""
+    name: str
+    username: str
+    password: str
+    is_active: bool = True
+
+
 # --- Auth ---
 
 class UserCreate(BaseModel):
     name: str
     username: str
-    password: str
+    password: Optional[str] = None
     role: str
-    # required when superadmin creates a staff directly (to assign them to an admin)
-    admin_id: Optional[int] = None
+    is_active: bool = True
+    cafe_id: Optional[str] = None
 
 
 class Token(BaseModel):
@@ -39,14 +85,19 @@ class Token(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: int
+    id: str
     name: str
     username: str
     role: str
-    admin_id: Optional[int] = None
+    is_active: bool
+    cafe_id: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+CafeWithAdminResponse.model_rebuild()
 
 
 # --- Floor & Table ---
