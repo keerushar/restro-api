@@ -11,18 +11,18 @@ from . import models, schemas, database, auth
 
 models.Base.metadata.create_all(bind=database.engine)
 
-# Auto-create superadmin on first startup if it doesn't exist
+# Auto-create super_admin on first startup if it doesn't exist
 def seed_superadmin():
     db = next(database.get_db())
     try:
-        exists = db.query(models.User).filter(models.User.role == "superadmin").first()
+        exists = db.query(models.User).filter(models.User.role == models.Role.SUPER_ADMIN).first()
         if not exists:
             db.add(models.User(
                 name="Super Admin",
                 username="superadmin",
                 hashed_password=auth.get_password_hash("super123"),
-                role="superadmin",
-                admin_id=None,
+                role=models.Role.SUPER_ADMIN,
+                cafe_id=None,
             ))
             db.commit()
     finally:
@@ -116,8 +116,8 @@ def get_current_user(
 ):
     try:
         payload = jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        user_id: str = payload.get("sub")
+        if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid auth credentials")
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid auth credentials")
@@ -126,60 +126,64 @@ def get_current_user(
     if blocked:
         raise HTTPException(status_code=401, detail="Token has been revoked. Please log in again.")
 
-    user = db.query(models.User).filter(models.User.username == username).first()
+    user = db.query(models.User).filter(models.User.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is inactive")
     return user
 
 
-def admin_only(user: models.User = Depends(get_current_user)):
-    if user.role not in ["admin", "superadmin"]:
-        raise HTTPException(status_code=403, detail="Admin privileges required")
+def super_admin_only(user: models.User = Depends(get_current_user)):
+    if user.role != models.Role.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    return user
+
+
+def cafe_admin_only(user: models.User = Depends(get_current_user)):
+    if user.role not in [models.Role.SUPER_ADMIN, models.Role.CAFE_ADMIN]:
+        raise HTTPException(status_code=403, detail="Cafe admin privileges required")
     return user
 
 
 def staff_only(user: models.User = Depends(get_current_user)):
-    if user.role not in ["admin", "superadmin", "staff"]:
-        raise HTTPException(status_code=403, detail="Staff privileges required")
+    # all roles have staff-level access
     return user
 
 
-def superadmin_only(user: models.User = Depends(get_current_user)):
-    if user.role != "superadmin":
-        raise HTTPException(status_code=403, detail="Superadmin privileges required")
-    return user
+# keep old names as aliases so other endpoints don't break
+admin_only = cafe_admin_only
+superadmin_only = super_admin_only
 
 
 # ============================================================
 # Scoping — the core of multi-tenancy
 # ============================================================
 
-def get_scope(current_user: models.User) -> Optional[int]:
+def get_scope(current_user: models.User) -> Optional[str]:
     """
-    Returns the admin_id to filter all queries with.
-    - superadmin → None  (no filter, sees everything)
-    - admin      → user.id
-    - staff      → user.admin_id (their admin's id)
+    Returns the cafe_id to filter all queries with.
+    - super_admin → None  (no filter, sees everything)
+    - cafe_admin  → user.cafe_id
+    - staff       → user.cafe_id
     """
-    if current_user.role == "superadmin":
+    if current_user.role == models.Role.SUPER_ADMIN:
         return None
-    if current_user.role == "admin":
-        return current_user.id
-    return current_user.admin_id  # staff
+    return current_user.cafe_id
 
 
 def apply_scope(query, model, current_user: models.User):
-    """Apply admin_id filter to a query if the user is not superadmin."""
+    """Apply cafe_id filter to a query if the user is not super_admin."""
     scope = get_scope(current_user)
     if scope is not None:
-        query = query.filter(model.admin_id == scope)
+        query = query.filter(model.cafe_id == scope)
     return query
 
 
-def assert_ownership(resource_admin_id: int, current_user: models.User):
-    """Raise 403 if the resource doesn't belong to the current user's admin scope."""
+def assert_ownership(resource_cafe_id: str, current_user: models.User):
+    """Raise 403 if the resource doesn't belong to the current user's cafe."""
     scope = get_scope(current_user)
-    if scope is not None and resource_admin_id != scope:
+    if scope is not None and resource_cafe_id != scope:
         raise HTTPException(status_code=403, detail="Access denied")
 
 
@@ -192,7 +196,7 @@ def get_profile(current_user: models.User = Depends(get_current_user)):
     return current_user
 
 
-@app.post("/logout")
+@app.post("/auth/logout")
 def logout(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(database.get_db),
@@ -204,38 +208,43 @@ def logout(
     return {"msg": "Logged out successfully"}
 
 
-@app.post("/register", response_model=schemas.UserResponse)
+@app.post("/auth/register", response_model=schemas.UserResponse)
 def register(
     user: schemas.UserCreate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    if user.role == "superadmin":
-        raise HTTPException(status_code=400, detail="Cannot create superadmin via API")
+    if user.role == models.Role.SUPER_ADMIN:
+        raise HTTPException(status_code=400, detail="Cannot create super_admin via API")
 
-    if user.role == "admin":
-        if current_user.role != "superadmin":
-            raise HTTPException(status_code=403, detail="Only superadmin can create admin accounts")
-        admin_id = None
+    if user.role == models.Role.CAFE_ADMIN:
+        if current_user.role != models.Role.SUPER_ADMIN:
+            raise HTTPException(status_code=403, detail="Only super_admin can create cafe_admin accounts")
+        if not user.cafe_id:
+            raise HTTPException(status_code=400, detail="cafe_id is required when creating a cafe_admin")
+        cafe = db.query(models.Cafe).filter(models.Cafe.id == user.cafe_id).first()
+        if not cafe:
+            raise HTTPException(status_code=404, detail="Cafe not found")
+        if not user.password:
+            user.password = "changeme123"
+        cafe_id = user.cafe_id
 
-    elif user.role == "staff":
-        if current_user.role == "admin":
-            admin_id = current_user.id
-        elif current_user.role == "superadmin":
-            if not user.admin_id:
-                raise HTTPException(status_code=400, detail="admin_id is required when superadmin creates a staff")
-            # validate the admin exists
-            admin = db.query(models.User).filter(
-                models.User.id == user.admin_id,
-                models.User.role == "admin",
-            ).first()
-            if not admin:
-                raise HTTPException(status_code=404, detail="Admin not found")
-            admin_id = user.admin_id
+    elif user.role == models.Role.STAFF:
+        if not user.password:
+            raise HTTPException(status_code=400, detail="Password is required when creating a staff account")
+        if current_user.role == models.Role.CAFE_ADMIN:
+            cafe_id = current_user.cafe_id
+        elif current_user.role == models.Role.SUPER_ADMIN:
+            if not user.cafe_id:
+                raise HTTPException(status_code=400, detail="cafe_id is required when super_admin creates staff")
+            cafe = db.query(models.Cafe).filter(models.Cafe.id == user.cafe_id).first()
+            if not cafe:
+                raise HTTPException(status_code=404, detail="Cafe not found")
+            cafe_id = user.cafe_id
         else:
-            raise HTTPException(status_code=403, detail="Only admin can create staff accounts")
+            raise HTTPException(status_code=403, detail="Only cafe_admin can create staff accounts")
     else:
-        raise HTTPException(status_code=400, detail="Invalid role")
+        raise HTTPException(status_code=400, detail="Invalid role. Must be cafe_admin or staff")
 
     if db.query(models.User).filter(models.User.username == user.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
@@ -245,7 +254,8 @@ def register(
         username=user.username,
         hashed_password=auth.get_password_hash(user.password),
         role=user.role,
-        admin_id=admin_id,
+        is_active=user.is_active,
+        cafe_id=cafe_id,
     )
     db.add(new_user)
     db.commit()
@@ -253,7 +263,7 @@ def register(
     return new_user
 
 
-@app.post("/login", response_model=schemas.Token)
+@app.post("/auth/login", response_model=schemas.Token)
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(database.get_db),
@@ -261,39 +271,163 @@ def login(
     user = db.query(models.User).filter(models.User.username == form_data.username).first()
     if not user or not auth.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
-    access_token = auth.create_access_token(data={"sub": user.username, "role": user.role})
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is inactive")
+    if user.cafe_id:
+        cafe = db.query(models.Cafe).filter(models.Cafe.id == user.cafe_id).first()
+        if cafe and not cafe.is_active:
+            raise HTTPException(status_code=403, detail="Cafe is inactive")
+    access_token = auth.create_access_token(
+        user_id=user.id,
+        role=user.role,
+        cafe_id=user.cafe_id,
+    )
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+# keep /login as alias for Swagger compatibility
+@app.post("/login", response_model=schemas.Token, include_in_schema=False)
+def login_alias(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(database.get_db),
+):
+    return login(form_data=form_data, db=db)
 
 
 # ============================================================
 # Staff management (admin sees their own staff)
 # ============================================================
 
+# ============================================================
+# Cafes (super_admin only)
+# ============================================================
+
+@app.post("/cafes", response_model=schemas.CafeWithAdminResponse)
+def create_cafe(
+    data: schemas.CafeCreate,
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(super_admin_only),
+):
+    if db.query(models.Cafe).filter(models.Cafe.username == data.cafe_username).first():
+        raise HTTPException(status_code=400, detail="Cafe username already taken")
+    if db.query(models.User).filter(models.User.username == data.admin.username).first():
+        raise HTTPException(status_code=400, detail="Admin username already taken")
+
+    new_cafe = models.Cafe(name=data.cafe_name, username=data.cafe_username)
+    db.add(new_cafe)
+    db.flush()  # get new_cafe.id before committing
+
+    new_admin = models.User(
+        name=data.admin.name,
+        username=data.admin.username,
+        hashed_password=auth.get_password_hash(data.admin.password),
+        role=models.Role.CAFE_ADMIN,
+        is_active=True,
+        cafe_id=new_cafe.id,
+    )
+    db.add(new_admin)
+    db.commit()
+    db.refresh(new_cafe)
+    db.refresh(new_admin)
+    return {"cafe": new_cafe, "admin": new_admin}
+
+
+@app.get("/cafes", response_model=List[schemas.CafeResponse])
+def list_cafes(
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(super_admin_only),
+):
+    return db.query(models.Cafe).all()
+
+
+@app.patch("/cafes/{cafe_id}/status", response_model=schemas.CafeResponse)
+def toggle_cafe_status(
+    cafe_id: str,
+    body: schemas.CafeStatusUpdate,
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(super_admin_only),
+):
+    cafe = db.query(models.Cafe).filter(models.Cafe.id == cafe_id).first()
+    if not cafe:
+        raise HTTPException(status_code=404, detail="Cafe not found")
+    cafe.is_active = body.is_active
+    db.commit()
+    db.refresh(cafe)
+    return cafe
+
+
+# ============================================================
+# Staff management
+# ============================================================
+
+@app.post("/staff", response_model=schemas.UserResponse)
+def create_staff(
+    data: schemas.StaffCreate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(cafe_admin_only),
+):
+    if db.query(models.User).filter(models.User.username == data.username).first():
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    new_staff = models.User(
+        name=data.name,
+        username=data.username,
+        hashed_password=auth.get_password_hash(data.password),
+        role=models.Role.STAFF,
+        is_active=data.is_active,
+        cafe_id=current_user.cafe_id,
+    )
+    db.add(new_staff)
+    db.commit()
+    db.refresh(new_staff)
+    return new_staff
+
+
 @app.get("/staff", response_model=List[schemas.UserResponse])
 def list_staff(
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(admin_only),
+    current_user: models.User = Depends(cafe_admin_only),
 ):
     scope = get_scope(current_user)
-    query = db.query(models.User).filter(models.User.role == "staff")
+    query = db.query(models.User).filter(models.User.role == models.Role.STAFF)
     if scope is not None:
-        query = query.filter(models.User.admin_id == scope)
+        query = query.filter(models.User.cafe_id == scope)
     return query.all()
+
+
+@app.patch("/staff/{staff_id}/status", response_model=schemas.UserResponse)
+def toggle_staff_status(
+    staff_id: str,
+    body: schemas.CafeStatusUpdate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(cafe_admin_only),
+):
+    staff = db.query(models.User).filter(
+        models.User.id == staff_id,
+        models.User.role == models.Role.STAFF,
+    ).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+    assert_ownership(staff.cafe_id, current_user)
+    staff.is_active = body.is_active
+    db.commit()
+    db.refresh(staff)
+    return staff
 
 
 @app.delete("/staff/{staff_id}")
 def delete_staff(
-    staff_id: int,
+    staff_id: str,
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(admin_only),
+    current_user: models.User = Depends(cafe_admin_only),
 ):
     staff = db.query(models.User).filter(
         models.User.id == staff_id,
-        models.User.role == "staff",
+        models.User.role == models.Role.STAFF,
     ).first()
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
-    assert_ownership(staff.admin_id, current_user)
+    assert_ownership(staff.cafe_id, current_user)
     db.delete(staff)
     db.commit()
     return {"msg": "Staff removed successfully"}
