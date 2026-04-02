@@ -1,9 +1,9 @@
 # Restaurant Management System — API Guide
 
-FastAPI + PostgreSQL + Docker backend for restaurant management.
+FastAPI + PostgreSQL + Docker | Multi-tenant café management backend.
 
 **Base URL:** `http://localhost:8000`
-**Interactive docs (Swagger):** `http://localhost:8000/docs`
+**Swagger UI:** `http://localhost:8000/docs`
 
 ---
 
@@ -13,143 +13,274 @@ FastAPI + PostgreSQL + Docker backend for restaurant management.
 docker-compose up --build
 ```
 
-> **Fresh database reset (after schema changes):**
-> ```bash
-> docker-compose down -v && docker-compose up --build
-> ```
+> **Fresh reset:** `docker-compose down -v && docker-compose up --build`
+
+---
+
+## Roles & Permissions
+
+| Role | `super_admin` | `cafe_admin` | `staff` |
+|------|:---:|:---:|:---:|
+| Create / manage cafés | ✅ | ❌ | ❌ |
+| Toggle café active status | ✅ | ❌ | ❌ |
+| Create staff | ❌ | ✅ | ❌ |
+| Toggle staff active status | ❌ | ✅ | ❌ |
+| Manage floors / tables / menu | ❌ | ✅ | ❌ |
+| Orders / reservations / bills | ❌ | ✅ | ✅ |
+| View analytics / history | ❌ | ✅ | ❌ |
 
 ---
 
 ## Authentication
 
-### Register a user
-```bash
-curl -X POST "http://localhost:8000/register" \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "admin123", "role": "admin"}'
+### Default super_admin (auto-seeded on startup)
+```
+username: superadmin
+password: super123
 ```
 
 ### Login
 ```bash
-curl -X POST "http://localhost:8000/login" \
+curl -X POST "http://localhost:8000/auth/login" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=admin&password=admin123"
+  -d "username=superadmin&password=super123"
 ```
-Save the `access_token`. Use it as `Authorization: Bearer <token>` on all protected routes.
 
-### Roles
-| Role | Access |
-|------|--------|
-| `superadmin` | Everything |
-| `admin` | Everything (floor/table/menu management + orders) |
-| `staff` | Orders, item requests |
+**Response:**
+```json
+{ "access_token": "eyJ...", "token_type": "bearer" }
+```
+
+Use the token on all protected routes:
+```
+Authorization: Bearer <token>
+```
+
+**Login blocks if:**
+- User `is_active = false` → `403 Account is inactive`
+- Café `is_active = false` → `403 Cafe is inactive`
+
+### Get profile
+```bash
+curl "http://localhost:8000/profile" \
+  -H "Authorization: Bearer TOKEN"
+```
+
+### Logout
+```bash
+curl -X POST "http://localhost:8000/logout" \
+  -H "Authorization: Bearer TOKEN"
+```
 
 ---
 
-## Floors (Admin)
+## Cafes
+
+### Create café + admin (one request)
+```bash
+curl -X POST "http://localhost:8000/cafes" \
+  -H "Authorization: Bearer SUPERADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cafe_name": "The Coffee House",
+    "cafe_username": "coffee_house",
+    "admin": {
+      "name": "John Doe",
+      "username": "john_admin",
+      "password": "secret123"
+    }
+  }'
+```
+
+**Response:**
+```json
+{
+  "cafe": {
+    "id": "uuid",
+    "name": "The Coffee House",
+    "username": "coffee_house",
+    "is_active": true,
+    "created_at": "2026-03-31T10:00:00Z"
+  },
+  "admin": {
+    "id": "uuid",
+    "name": "John Doe",
+    "username": "john_admin",
+    "role": "cafe_admin",
+    "is_active": true,
+    "cafe_id": "uuid",
+    "created_at": "2026-03-31T10:00:00Z"
+  }
+}
+```
+
+### List all cafés
+```bash
+curl "http://localhost:8000/cafes" \
+  -H "Authorization: Bearer SUPERADMIN_TOKEN"
+```
+
+### Toggle café active/inactive
+```bash
+# Deactivate — blocks all users of this café from logging in
+curl -X PATCH "http://localhost:8000/cafes/{cafe_id}/status" \
+  -H "Authorization: Bearer SUPERADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "is_active": false }'
+
+# Reactivate
+curl -X PATCH "http://localhost:8000/cafes/{cafe_id}/status" \
+  -H "Authorization: Bearer SUPERADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "is_active": true }'
+```
+
+---
+
+## Staff
+
+### Create staff
+```bash
+curl -X POST "http://localhost:8000/staff" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Jane Smith",
+    "username": "jane_staff",
+    "password": "pass123",
+    "is_active": true
+  }'
+```
+
+Staff is automatically assigned to the calling admin's café.
+
+### List staff
+```bash
+curl "http://localhost:8000/staff" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
+```
+
+### Toggle staff active/inactive
+```bash
+curl -X PATCH "http://localhost:8000/staff/{staff_id}/status" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "is_active": false }'
+```
+
+### Delete staff
+```bash
+curl -X DELETE "http://localhost:8000/staff/{staff_id}" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
+```
+
+---
+
+## Floors
 
 ```bash
 # Create
 curl -X POST "http://localhost:8000/floors" \
-  -H "Authorization: Bearer TOKEN" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Ground Floor"}'
+  -d '{ "name": "Ground Floor" }'
 
-# List all (public)
-curl "http://localhost:8000/floors"
+# List (scoped to caller's café)
+curl "http://localhost:8000/floors" \
+  -H "Authorization: Bearer TOKEN"
 
-# Get one (public)
-curl "http://localhost:8000/floors/1"
+# Get one
+curl "http://localhost:8000/floors/1" \
+  -H "Authorization: Bearer TOKEN"
 
 # Update
 curl -X PUT "http://localhost:8000/floors/1" \
-  -H "Authorization: Bearer TOKEN" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Rooftop"}'
+  -d '{ "name": "Rooftop" }'
 
 # Delete
 curl -X DELETE "http://localhost:8000/floors/1" \
-  -H "Authorization: Bearer TOKEN"
+  -H "Authorization: Bearer ADMIN_TOKEN"
 ```
 
 ---
 
-## Tables (Admin)
-
-Each table has an `id` (primary key), `table_number` (integer), and `table_name` (display name). Tables are independent — no floor dependency.
+## Tables
 
 ```bash
 # Create
 curl -X POST "http://localhost:8000/tables" \
-  -H "Authorization: Bearer TOKEN" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"table_number": 5, "table_name": "Window Table"}'
+  -d '{ "table_number": 5, "table_name": "Window Table" }'
 
-# List all (public)
-curl "http://localhost:8000/tables"
+# List
+curl "http://localhost:8000/tables" \
+  -H "Authorization: Bearer TOKEN"
 
-# Get one (public)
-curl "http://localhost:8000/tables/1"
+# Get one
+curl "http://localhost:8000/tables/1" \
+  -H "Authorization: Bearer TOKEN"
+
+# Get active order on a table
+curl "http://localhost:8000/tables/1/active-order" \
+  -H "Authorization: Bearer TOKEN"
 
 # Update
 curl -X PUT "http://localhost:8000/tables/1" \
-  -H "Authorization: Bearer TOKEN" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"table_name": "Corner Table"}'
+  -d '{ "table_name": "Corner Table" }'
 
 # Delete
 curl -X DELETE "http://localhost:8000/tables/1" \
-  -H "Authorization: Bearer TOKEN"
+  -H "Authorization: Bearer ADMIN_TOKEN"
 ```
 
 ---
 
-## Menu Items (Admin)
+## Menu Items
 
 ```bash
 # Create
 curl -X POST "http://localhost:8000/menu-items" \
-  -H "Authorization: Bearer TOKEN" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Butter Chicken", "price": 12.99, "is_available": true}'
+  -d '{ "name": "Butter Chicken", "price": 12.99, "is_available": true }'
 
-# List all (public) — add ?available_only=true to filter
-curl "http://localhost:8000/menu-items?available_only=true"
-
-# Get one (public)
-curl "http://localhost:8000/menu-items/1"
-
-# Update name or price
-curl -X PUT "http://localhost:8000/menu-items/1" \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Butter Chicken", "price": 13.99}'
-
-# Toggle availability (admin dashboard)
-curl -X PATCH "http://localhost:8000/menu-items/1/availability?is_available=false" \
+# List (add ?available_only=true to filter)
+curl "http://localhost:8000/menu-items" \
   -H "Authorization: Bearer TOKEN"
+
+# Get one
+curl "http://localhost:8000/menu-items/1" \
+  -H "Authorization: Bearer TOKEN"
+
+# Update
+curl -X PUT "http://localhost:8000/menu-items/1" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Butter Chicken", "price": 13.99 }'
+
+# Toggle availability
+curl -X PATCH "http://localhost:8000/menu-items/1/availability?is_available=false" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
 
 # Delete
 curl -X DELETE "http://localhost:8000/menu-items/1" \
-  -H "Authorization: Bearer TOKEN"
+  -H "Authorization: Bearer ADMIN_TOKEN"
 ```
 
 ---
 
-## Orders (Staff)
+## Orders
 
-### Order statuses
-`ordering` → `placed` → `completed` → `cancelled`
+### Order statuses: `pending` → `completed`
+### Item statuses: `ordered` → `placed` | `cancelled`
 
-### Item statuses
-`ordered` → `placed`
-
----
-
-### Create an order
-
-When a customer sits down, create an order for that table. Item `name` and `price` are snapshotted automatically from the menu.
-
+### Create order
+If a table already has an active order, items are added to it automatically.
 ```bash
 curl -X POST "http://localhost:8000/orders" \
   -H "Authorization: Bearer STAFF_TOKEN" \
@@ -157,185 +288,138 @@ curl -X POST "http://localhost:8000/orders" \
   -d '{
     "table_id": 1,
     "items": [
-      {"menu_item_id": 1, "quantity": 2},
-      {"menu_item_id": 3, "quantity": 1}
+      { "menu_item_id": 1, "quantity": 2 },
+      { "menu_item_id": 3, "quantity": 1 }
     ]
   }'
 ```
 
-**Response includes:** `id`, `tableNumber`, `tableName` (floor name), `status`, `totalAmount`, `items[]`, `createdAt`
-
-> A table cannot have two active orders at the same time.
-
----
-
-### Add more items to an existing order
-
-Customer orders additional dishes after the initial order.
-
+### Add items to existing order
 ```bash
 curl -X POST "http://localhost:8000/orders/1/items" \
   -H "Authorization: Bearer STAFF_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "items": [
-      {"menu_item_id": 4, "quantity": 1}
-    ]
-  }'
+  -d '{ "items": [{ "menu_item_id": 4, "quantity": 1 }] }'
 ```
 
-> Only works if the order status is `ordering` or `placed`.
-
----
-
-### Toggle an item's status (ordered → placed)
-
-Staff marks individual items as sent to the kitchen.
-
+### Toggle item status
 ```bash
 curl -X PATCH "http://localhost:8000/orders/1/items/3/status" \
   -H "Authorization: Bearer STAFF_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"status": "placed"}'
+  -d '{ "status": "placed" }'
 ```
 
-`status` values: `ordered` | `placed`
-
----
-
 ### Update order status
-
 ```bash
 curl -X PATCH "http://localhost:8000/orders/1/status" \
   -H "Authorization: Bearer STAFF_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"status": "placed"}'
+  -d '{ "status": "completed" }'
 ```
 
-`status` values: `ordering` | `placed` | `completed` | `cancelled`
-
-> Cannot update a `completed` or `cancelled` order.
-
----
-
 ### Transfer order to another table
-
-Move a customer's order to a different table.
-
 ```bash
 curl -X POST "http://localhost:8000/orders/1/transfer" \
   -H "Authorization: Bearer STAFF_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"target_table_id": 5}'
+  -d '{ "target_table_id": 5 }'
 ```
-
-**Conditions:**
-- Source order must be active (`ordering` or `placed`)
-- Target table must have no active order
-
----
 
 ### List / get orders
-
 ```bash
-# All orders
-curl "http://localhost:8000/orders" \
-  -H "Authorization: Bearer STAFF_TOKEN"
+curl "http://localhost:8000/orders" -H "Authorization: Bearer STAFF_TOKEN"
+curl "http://localhost:8000/orders?table_id=1" -H "Authorization: Bearer STAFF_TOKEN"
+curl "http://localhost:8000/orders?status=pending" -H "Authorization: Bearer STAFF_TOKEN"
+curl "http://localhost:8000/orders/1" -H "Authorization: Bearer STAFF_TOKEN"
+```
 
-# Filter by table
-curl "http://localhost:8000/orders?table_id=1" \
-  -H "Authorization: Bearer STAFF_TOKEN"
-
-# Filter by status
-curl "http://localhost:8000/orders?status=ordering" \
-  -H "Authorization: Bearer STAFF_TOKEN"
-
-# Get one order
-curl "http://localhost:8000/orders/1" \
-  -H "Authorization: Bearer STAFF_TOKEN"
+### Delete order (admin only)
+```bash
+curl -X DELETE "http://localhost:8000/orders/1" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
 ```
 
 ---
 
-## Bills & Payments (Staff)
+## Bills & Payments
 
-### Generate a bill
-
-Creates a bill snapshot from the current order. Can only be done once per order.
-
+### Generate bill
 ```bash
 curl -X POST "http://localhost:8000/orders/1/bill" \
   -H "Authorization: Bearer STAFF_TOKEN"
 ```
 
-**Response matches `OrderBill` model:** `orderId`, `tableNumber`, `tableName`, `items[]`, `totalAmount`, `generatedAt`, `isPaid`
-
----
-
-### Get existing bill
-
+### Get bill
 ```bash
 curl "http://localhost:8000/orders/1/bill" \
   -H "Authorization: Bearer STAFF_TOKEN"
 ```
 
----
-
-### Mark bill as paid
-
-Sets `isPaid = true`, records `paidAt`, and automatically moves order status to `completed`.
-
+### Pay bill
+`pay_type`: `cash` | `qr`
 ```bash
 curl -X POST "http://localhost:8000/bills/1/pay" \
-  -H "Authorization: Bearer STAFF_TOKEN"
+  -H "Authorization: Bearer STAFF_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "pay_type": "cash" }'
+```
+
+### List all bills
+```bash
+curl "http://localhost:8000/bills" -H "Authorization: Bearer STAFF_TOKEN"
+curl "http://localhost:8000/bills?is_paid=true" -H "Authorization: Bearer STAFF_TOKEN"
+curl "http://localhost:8000/bills?date=2026-03-31" -H "Authorization: Bearer STAFF_TOKEN"
+```
+
+### Daily sales summary (admin)
+```bash
+curl "http://localhost:8000/bills/daily-summary" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
+
+# Specific date
+curl "http://localhost:8000/bills/daily-summary?date=2026-03-31" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
 ```
 
 ---
 
-## Order History (Audit Log)
+## Order History
 
-All key actions are automatically logged — no manual input needed.
-
-### Events logged automatically
-| Event | Trigger |
-|-------|---------|
-| `order_created` | New order created |
-| `item_added` | Items added to existing order |
-| `item_status_changed` | Item toggled ordered → placed |
-| `status_changed` | Order status updated |
-| `order_cancelled` | Order status set to cancelled |
-| `table_transferred` | Order moved to another table |
-| `bill_generated` | Bill created |
-| `payment_received` | Bill marked as paid |
-
-### Get history for a specific order
+### History for one order
 ```bash
 curl "http://localhost:8000/orders/1/history" \
   -H "Authorization: Bearer STAFF_TOKEN"
 ```
 
-### Get all history (Admin)
+### All history (admin)
 ```bash
-# All events
-curl "http://localhost:8000/history" \
-  -H "Authorization: Bearer ADMIN_TOKEN"
-
-# Filter by order
-curl "http://localhost:8000/history?order_id=1" \
-  -H "Authorization: Bearer ADMIN_TOKEN"
-
-# Filter by event type
-curl "http://localhost:8000/history?event_type=table_transferred" \
-  -H "Authorization: Bearer ADMIN_TOKEN"
+curl "http://localhost:8000/history" -H "Authorization: Bearer ADMIN_TOKEN"
+curl "http://localhost:8000/history?order_id=1" -H "Authorization: Bearer ADMIN_TOKEN"
+curl "http://localhost:8000/history?event_type=payment_received" -H "Authorization: Bearer ADMIN_TOKEN"
 ```
+
+**Event types:** `order_created`, `item_added`, `item_status_changed`, `status_changed`, `table_transferred`, `bill_generated`, `payment_received`
 
 ---
 
-## Reservations (Public)
+## Revenue Analytics
+
+```bash
+curl "http://localhost:8000/revenue" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
+```
+
+Returns breakdown for `day` (hourly), `week` (daily), `month` (daily), `year` (monthly).
+
+---
+
+## Reservations
 
 ```bash
 # Book a table
 curl -X POST "http://localhost:8000/reservations" \
+  -H "Authorization: Bearer STAFF_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "table_id": 1,
@@ -345,10 +429,14 @@ curl -X POST "http://localhost:8000/reservations" \
   }'
 
 # List (filter by table: ?table_id=1)
-curl "http://localhost:8000/reservations"
+curl "http://localhost:8000/reservations" -H "Authorization: Bearer STAFF_TOKEN"
+
+# Get one
+curl "http://localhost:8000/reservations/1" -H "Authorization: Bearer STAFF_TOKEN"
 
 # Cancel
-curl -X DELETE "http://localhost:8000/reservations/1"
+curl -X DELETE "http://localhost:8000/reservations/1" \
+  -H "Authorization: Bearer STAFF_TOKEN"
 ```
 
 > Overlapping time slots for the same table are rejected automatically.
@@ -357,14 +445,12 @@ curl -X DELETE "http://localhost:8000/reservations/1"
 
 ## Staff Item Requests
 
-Staff can request menu items for admin review.
-
 ```bash
 # Request new item
 curl -X POST "http://localhost:8000/staff/request-item" \
   -H "Authorization: Bearer STAFF_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"item_name": "Vegan Burger", "description": "Customers keep asking for it"}'
+  -d '{ "item_name": "Vegan Burger", "description": "Customers keep asking for it" }'
 
 # Admin: view all requests (sorted by request count)
 curl "http://localhost:8000/admin/item-requests" \
@@ -382,76 +468,96 @@ curl -X DELETE "http://localhost:8000/admin/item-requests/1" \
 ### Auth
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/register` | Public | Register user |
-| POST | `/login` | Public | Login, get JWT |
+| POST | `/auth/login` | Public | Login, get JWT |
+| POST | `/logout` | Any | Invalidate token |
+| GET | `/profile` | Any | Current user info |
+
+### Cafes
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/cafes` | super_admin | Create café + admin |
+| GET | `/cafes` | super_admin | List all cafés |
+| PATCH | `/cafes/{id}/status` | super_admin | Toggle active/inactive |
+
+### Staff
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/staff` | cafe_admin | Create staff |
+| GET | `/staff` | cafe_admin | List staff |
+| PATCH | `/staff/{id}/status` | cafe_admin | Toggle active/inactive |
+| DELETE | `/staff/{id}` | cafe_admin | Remove staff |
 
 ### Floors
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/floors` | Admin | Create floor |
-| GET | `/floors` | Public | List all floors |
-| GET | `/floors/{id}` | Public | Get floor |
-| PUT | `/floors/{id}` | Admin | Update floor |
-| DELETE | `/floors/{id}` | Admin | Delete floor |
+| POST | `/floors` | cafe_admin | Create floor |
+| GET | `/floors` | staff | List floors |
+| GET | `/floors/{id}` | staff | Get floor |
+| PUT | `/floors/{id}` | cafe_admin | Update floor |
+| DELETE | `/floors/{id}` | cafe_admin | Delete floor |
 
 ### Tables
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/tables` | Admin | Create table (`table_number`, `table_name`) |
-| GET | `/tables` | Public | List tables |
-| GET | `/tables/{id}` | Public | Get table |
-| PUT | `/tables/{id}` | Admin | Update table |
-| DELETE | `/tables/{id}` | Admin | Delete table |
+| POST | `/tables` | cafe_admin | Create table |
+| GET | `/tables` | staff | List tables |
+| GET | `/tables/{id}` | staff | Get table |
+| GET | `/tables/{id}/active-order` | staff | Active order on table |
+| PUT | `/tables/{id}` | cafe_admin | Update table |
+| DELETE | `/tables/{id}` | cafe_admin | Delete table |
 
 ### Menu Items
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/menu-items` | Admin | Create item |
-| GET | `/menu-items` | Public | List items (`?available_only=true`) |
-| GET | `/menu-items/{id}` | Public | Get item |
-| PUT | `/menu-items/{id}` | Admin | Update name / price |
-| PATCH | `/menu-items/{id}/availability` | Admin | Toggle availability |
-| DELETE | `/menu-items/{id}` | Admin | Delete item |
+| POST | `/menu-items` | cafe_admin | Create item |
+| GET | `/menu-items` | staff | List items (`?available_only=true`) |
+| GET | `/menu-items/{id}` | staff | Get item |
+| PUT | `/menu-items/{id}` | cafe_admin | Update item |
+| PATCH | `/menu-items/{id}/availability` | cafe_admin | Toggle availability |
+| DELETE | `/menu-items/{id}` | cafe_admin | Delete item |
 
 ### Orders
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/orders` | Staff | Create order |
-| GET | `/orders` | Staff | List orders (`?table_id=`, `?status=`) |
-| GET | `/orders/{id}` | Staff | Get order |
-| POST | `/orders/{id}/items` | Staff | Add items to order |
-| PATCH | `/orders/{id}/items/{item_id}/status` | Staff | Toggle item status |
-| PATCH | `/orders/{id}/status` | Staff | Update order status |
-| POST | `/orders/{id}/transfer` | Staff | Transfer to another table |
-| DELETE | `/orders/{id}` | Admin | Delete order |
-
-### History
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/orders/{id}/history` | Staff | History for one order |
-| GET | `/history` | Admin | All events (`?order_id=`, `?event_type=`) |
+| POST | `/orders` | staff | Create order |
+| GET | `/orders` | staff | List orders |
+| GET | `/orders/{id}` | staff | Get order |
+| POST | `/orders/{id}/items` | staff | Add items |
+| PATCH | `/orders/{id}/items/{item_id}/status` | staff | Toggle item status |
+| PATCH | `/orders/{id}/status` | staff | Update order status |
+| POST | `/orders/{id}/transfer` | staff | Transfer to another table |
+| DELETE | `/orders/{id}` | cafe_admin | Delete order |
 
 ### Bills & Payments
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/orders/{id}/bill` | Staff | Generate bill |
-| GET | `/orders/{id}/bill` | Staff | Get bill |
-| POST | `/bills/{id}/pay` | Staff | Mark as paid |
+| POST | `/orders/{id}/bill` | staff | Generate bill |
+| GET | `/orders/{id}/bill` | staff | Get bill |
+| POST | `/bills/{id}/pay` | staff | Mark as paid |
+| GET | `/bills` | staff | List bills |
+| GET | `/bills/daily-summary` | cafe_admin | Daily sales summary |
+
+### History & Analytics
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/orders/{id}/history` | staff | Order audit log |
+| GET | `/history` | cafe_admin | All events |
+| GET | `/revenue` | cafe_admin | Revenue analytics |
 
 ### Reservations
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/reservations` | Public | Book table |
-| GET | `/reservations` | Public | List (`?table_id=`) |
-| GET | `/reservations/{id}` | Public | Get reservation |
-| DELETE | `/reservations/{id}` | Public | Cancel |
+| POST | `/reservations` | staff | Book table |
+| GET | `/reservations` | staff | List (`?table_id=`) |
+| GET | `/reservations/{id}` | staff | Get reservation |
+| DELETE | `/reservations/{id}` | staff | Cancel |
 
-### Staff Requests
+### Staff Item Requests
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/staff/request-item` | Staff | Request new item |
-| GET | `/admin/item-requests` | Admin | View requests |
-| DELETE | `/admin/item-requests/{id}` | Admin | Delete request |
+| POST | `/staff/request-item` | staff | Request new item |
+| GET | `/admin/item-requests` | cafe_admin | View requests |
+| DELETE | `/admin/item-requests/{id}` | cafe_admin | Delete request |
 
 ---
 
@@ -459,16 +565,18 @@ curl -X DELETE "http://localhost:8000/admin/item-requests/1" \
 
 | Table | Purpose |
 |-------|---------|
-| `users` | Accounts with roles |
-| `floors` | Restaurant floors/sections |
-| `tables` | Tables per floor |
-| `menu_items` | Food & drink items (added by admin) |
-| `item_requests` | Staff-requested additions |
+| `cafes` | Café accounts with `is_active` flag |
+| `users` | All users (super_admin / cafe_admin / staff) with `is_active` flag |
+| `floors` | Floors per café |
+| `tables` | Tables per café |
+| `menu_items` | Menu per café |
+| `item_requests` | Staff-requested menu additions |
 | `reservations` | Table bookings |
-| `orders` | Customer orders (with table/price snapshots) |
-| `order_items` | Line items per order (name/price snapshotted) |
-| `order_history` | Audit log of all order events |
-| `bills` | Generated bills and payment state |
+| `orders` | Orders (table/price snapshotted at creation) |
+| `order_items` | Line items per order |
+| `order_history` | Audit log |
+| `bills` | Bills and payment state |
+| `token_blocklist` | Revoked JWT tokens |
 
 ---
 
@@ -481,7 +589,7 @@ docker-compose up --build
 # View API logs
 docker-compose logs -f backend
 
-# Connect to DB directly
+# Connect to DB
 docker exec -it restro-api-db-1 psql -U user -d restaurant_db
 
 # Stop
@@ -490,14 +598,3 @@ docker-compose down
 # Full reset (drops all data)
 docker-compose down -v
 ```
-
----
-
-## Tech Stack
-
-- **FastAPI** — API framework
-- **PostgreSQL** — Database
-- **SQLAlchemy** — ORM
-- **JWT + OAuth2** — Authentication
-- **bcrypt** — Password hashing
-- **Docker Compose** — Containerization

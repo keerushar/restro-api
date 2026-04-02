@@ -170,7 +170,7 @@ class ItemRequestCreate(BaseModel):
 
 class ItemRequestResponse(BaseModel):
     id: int
-    requested_by_id: int
+    requested_by_id: str
     item_name: str
     description: str
     request_count: int
@@ -236,7 +236,7 @@ class OrderResponse(BaseModel):
     table_id: int
     table_number: int
     table_name: str
-    staff_id: Optional[int] = None
+    staff_id: Optional[str] = None
     status: OrderStatus
     total_amount: float
     ordered_items: List[OrderItemResponse] = []
@@ -261,7 +261,7 @@ class OrderHistoryResponse(BaseModel):
     order_id: int
     event_type: str
     description: Optional[str] = None
-    actor_id: Optional[int] = None
+    actor_id: Optional[str] = None
     created_at: datetime
 
     class Config:
