@@ -443,7 +443,7 @@ def create_floor(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(admin_only),
 ):
-    new_floor = models.Floor(name=floor.name, admin_id=current_user.id)
+    new_floor = models.Floor(name=floor.name, cafe_id=current_user.cafe_id)
     db.add(new_floor)
     db.commit()
     db.refresh(new_floor)
@@ -467,7 +467,7 @@ def read_floor(
     floor = db.query(models.Floor).filter(models.Floor.id == floor_id).first()
     if not floor:
         raise HTTPException(status_code=404, detail="Floor not found")
-    assert_ownership(floor.admin_id, current_user)
+    assert_ownership(floor.cafe_id, current_user)
     return floor
 
 
@@ -481,7 +481,7 @@ def update_floor(
     floor = db.query(models.Floor).filter(models.Floor.id == floor_id).first()
     if not floor:
         raise HTTPException(status_code=404, detail="Floor not found")
-    assert_ownership(floor.admin_id, current_user)
+    assert_ownership(floor.cafe_id, current_user)
     if floor_update.name is not None:
         floor.name = floor_update.name
     db.commit()
@@ -498,7 +498,7 @@ def delete_floor(
     floor = db.query(models.Floor).filter(models.Floor.id == floor_id).first()
     if not floor:
         raise HTTPException(status_code=404, detail="Floor not found")
-    assert_ownership(floor.admin_id, current_user)
+    assert_ownership(floor.cafe_id, current_user)
     db.delete(floor)
     db.commit()
     return {"msg": "Floor deleted successfully"}
@@ -514,7 +514,7 @@ def create_table(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(admin_only),
 ):
-    new_table = models.Table(**table.model_dump(), admin_id=current_user.id)
+    new_table = models.Table(**table.model_dump(), cafe_id=current_user.cafe_id)
     db.add(new_table)
     db.commit()
     db.refresh(new_table)
@@ -538,7 +538,7 @@ def read_table(
     table = db.query(models.Table).filter(models.Table.id == table_id).first()
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
-    assert_ownership(table.admin_id, current_user)
+    assert_ownership(table.cafe_id, current_user)
     return table
 
 
@@ -552,7 +552,7 @@ def update_table(
     table = db.query(models.Table).filter(models.Table.id == table_id).first()
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
-    assert_ownership(table.admin_id, current_user)
+    assert_ownership(table.cafe_id, current_user)
     if table_update.table_number is not None:
         table.table_number = table_update.table_number
     if table_update.table_name is not None:
@@ -571,7 +571,7 @@ def delete_table(
     table = db.query(models.Table).filter(models.Table.id == table_id).first()
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
-    assert_ownership(table.admin_id, current_user)
+    assert_ownership(table.cafe_id, current_user)
     db.delete(table)
     db.commit()
     return {"msg": "Table deleted successfully"}
@@ -587,7 +587,7 @@ def create_menu_item(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(admin_only),
 ):
-    new_item = models.MenuItem(**item.model_dump(), admin_id=current_user.id)
+    new_item = models.MenuItem(**item.model_dump(), cafe_id=current_user.cafe_id)
     db.add(new_item)
     db.commit()
     db.refresh(new_item)
@@ -615,7 +615,7 @@ def get_menu_item(
     item = db.query(models.MenuItem).filter(models.MenuItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Menu item not found")
-    assert_ownership(item.admin_id, current_user)
+    assert_ownership(item.cafe_id, current_user)
     return item
 
 
@@ -629,7 +629,7 @@ def update_menu_item(
     item = db.query(models.MenuItem).filter(models.MenuItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Menu item not found")
-    assert_ownership(item.admin_id, current_user)
+    assert_ownership(item.cafe_id, current_user)
     if item_update.name is not None:
         item.name = item_update.name
     if item_update.price is not None:
@@ -651,7 +651,7 @@ def toggle_menu_item_availability(
     item = db.query(models.MenuItem).filter(models.MenuItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Menu item not found")
-    assert_ownership(item.admin_id, current_user)
+    assert_ownership(item.cafe_id, current_user)
     item.is_available = is_available
     db.commit()
     db.refresh(item)
@@ -667,7 +667,7 @@ def delete_menu_item(
     item = db.query(models.MenuItem).filter(models.MenuItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Menu item not found")
-    assert_ownership(item.admin_id, current_user)
+    assert_ownership(item.cafe_id, current_user)
     db.delete(item)
     db.commit()
     return {"msg": "Menu item deleted successfully"}
@@ -683,10 +683,10 @@ def request_new_item(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(staff_only),
 ):
-    admin_id = get_scope(current_user)
+    cafe_id = get_scope(current_user)
     existing = db.query(models.ItemRequest).filter(
         models.ItemRequest.item_name == req.item_name,
-        models.ItemRequest.admin_id == admin_id,
+        models.ItemRequest.cafe_id == cafe_id,
     ).first()
     if existing:
         existing.request_count += 1
@@ -695,7 +695,7 @@ def request_new_item(
         db.add(models.ItemRequest(
             **req.model_dump(),
             requested_by_id=current_user.id,
-            admin_id=admin_id,
+            cafe_id=cafe_id,
         ))
         db.commit()
     return {"msg": "Request logged"}
@@ -722,7 +722,7 @@ def delete_item_request(
     item_request = db.query(models.ItemRequest).filter(models.ItemRequest.id == request_id).first()
     if not item_request:
         raise HTTPException(status_code=404, detail="Item request not found")
-    assert_ownership(item_request.admin_id, current_user)
+    assert_ownership(item_request.cafe_id, current_user)
     db.delete(item_request)
     db.commit()
     return {"msg": "Item request deleted successfully"}
@@ -749,10 +749,10 @@ def book_table(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(staff_only),
 ):
-    admin_id = get_scope(current_user)
+    cafe_id = get_scope(current_user)
     table = db.query(models.Table).filter(
         models.Table.id == booking.table_id,
-        models.Table.admin_id == admin_id,
+        models.Table.cafe_id == cafe_id,
     ).first()
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
@@ -760,7 +760,7 @@ def book_table(
         raise HTTPException(status_code=400, detail="End time must be after start time")
     if not check_table_availability(booking.table_id, booking.start_time, booking.end_time, db):
         raise HTTPException(status_code=400, detail="Table is not available for the requested time slot")
-    new_res = models.Reservation(**booking.model_dump(), admin_id=admin_id)
+    new_res = models.Reservation(**booking.model_dump(), cafe_id=cafe_id)
     db.add(new_res)
     db.commit()
     db.refresh(new_res)
@@ -788,7 +788,7 @@ def get_reservation(
     res = db.query(models.Reservation).filter(models.Reservation.id == reservation_id).first()
     if not res:
         raise HTTPException(status_code=404, detail="Reservation not found")
-    assert_ownership(res.admin_id, current_user)
+    assert_ownership(res.cafe_id, current_user)
     return res
 
 
@@ -801,7 +801,7 @@ def cancel_reservation(
     res = db.query(models.Reservation).filter(models.Reservation.id == reservation_id).first()
     if not res:
         raise HTTPException(status_code=404, detail="Reservation not found")
-    assert_ownership(res.admin_id, current_user)
+    assert_ownership(res.cafe_id, current_user)
     db.delete(res)
     db.commit()
     return {"msg": "Reservation cancelled successfully"}
@@ -818,10 +818,10 @@ def get_active_order_for_table(
     current_user: models.User = Depends(staff_only),
 ):
     """Get the current active order on a table including all its items."""
-    admin_id = get_scope(current_user)
+    cafe_id = get_scope(current_user)
     table = db.query(models.Table).filter(
         models.Table.id == table_id,
-        models.Table.admin_id == admin_id,
+        models.Table.cafe_id == cafe_id,
     ).first()
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
@@ -833,12 +833,12 @@ def get_active_order_for_table(
         raise HTTPException(status_code=404, detail="No active order on this table")
     return order
 
-def _resolve_order_items(items, db, admin_id):
+def _resolve_order_items(items, db, cafe_id):
     order_items = []
     for item in items:
         menu_item = db.query(models.MenuItem).filter(
             models.MenuItem.id == item.menu_item_id,
-            models.MenuItem.admin_id == admin_id,
+            models.MenuItem.cafe_id == cafe_id,
         ).first()
         if not menu_item:
             raise HTTPException(status_code=404, detail=f"Menu item {item.menu_item_id} not found")
@@ -860,11 +860,11 @@ def create_order(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(staff_only),
 ):
-    admin_id = get_scope(current_user)
+    cafe_id = get_scope(current_user)
 
     table = db.query(models.Table).filter(
         models.Table.id == order_data.table_id,
-        models.Table.admin_id == admin_id,
+        models.Table.cafe_id == cafe_id,
     ).first()
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
@@ -876,7 +876,7 @@ def create_order(
     ).first()
 
     if active:
-        order_items = _resolve_order_items(order_data.items, db, admin_id)
+        order_items = _resolve_order_items(order_data.items, db, cafe_id)
         for oi in order_items:
             oi.order_id = active.id
             db.add(oi)
@@ -892,7 +892,7 @@ def create_order(
         return active
 
     new_order = models.Order(
-        admin_id=admin_id,
+        cafe_id=cafe_id,
         table_id=table.id,
         table_number=table.table_number,
         table_name=table.table_name,
@@ -902,7 +902,7 @@ def create_order(
     db.add(new_order)
     db.flush()
 
-    order_items = _resolve_order_items(order_data.items, db, admin_id)
+    order_items = _resolve_order_items(order_data.items, db, cafe_id)
     for oi in order_items:
         oi.order_id = new_order.id
         db.add(oi)
@@ -945,7 +945,7 @@ def get_order(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    assert_ownership(order.admin_id, current_user)
+    assert_ownership(order.cafe_id, current_user)
     return order
 
 
@@ -959,12 +959,12 @@ def add_items_to_order(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    assert_ownership(order.admin_id, current_user)
+    assert_ownership(order.cafe_id, current_user)
     if order.status not in ACTIVE_ORDER_STATUSES:
         raise HTTPException(status_code=400, detail="Cannot add items to a completed order")
 
-    admin_id = get_scope(current_user)
-    order_items = _resolve_order_items(body.items, db, admin_id)
+    cafe_id = get_scope(current_user)
+    order_items = _resolve_order_items(body.items, db, cafe_id)
     for oi in order_items:
         oi.order_id = order.id
         db.add(oi)
@@ -990,7 +990,7 @@ def update_item_status(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    assert_ownership(order.admin_id, current_user)
+    assert_ownership(order.cafe_id, current_user)
 
     order_item = db.query(models.OrderItem).filter(
         models.OrderItem.id == item_id,
@@ -1019,7 +1019,7 @@ def update_order_status(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    assert_ownership(order.admin_id, current_user)
+    assert_ownership(order.cafe_id, current_user)
     if order.status == "completed":
         raise HTTPException(status_code=400, detail="Cannot update a completed order")
 
@@ -1045,16 +1045,16 @@ def transfer_table(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    assert_ownership(order.admin_id, current_user)
+    assert_ownership(order.cafe_id, current_user)
     if order.status not in ACTIVE_ORDER_STATUSES:
         raise HTTPException(status_code=400, detail="Only active orders can be transferred")
     if order.table_id == body.target_table_id:
         raise HTTPException(status_code=400, detail="Order is already at that table")
 
-    admin_id = get_scope(current_user)
+    cafe_id = get_scope(current_user)
     target_table = db.query(models.Table).with_for_update().filter(
         models.Table.id == body.target_table_id,
-        models.Table.admin_id == admin_id,   # cannot transfer to another admin's table
+        models.Table.cafe_id == cafe_id,
     ).first()
     if not target_table:
         raise HTTPException(status_code=404, detail="Target table not found")
@@ -1089,7 +1089,7 @@ def delete_order(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    assert_ownership(order.admin_id, current_user)
+    assert_ownership(order.cafe_id, current_user)
     db.delete(order)
     db.commit()
     return {"msg": "Order deleted successfully"}
@@ -1108,7 +1108,7 @@ def get_order_history(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    assert_ownership(order.admin_id, current_user)
+    assert_ownership(order.cafe_id, current_user)
     return (db.query(models.OrderHistory)
             .filter(models.OrderHistory.order_id == order_id)
             .order_by(models.OrderHistory.created_at)
@@ -1126,7 +1126,7 @@ def get_all_history(
     scope = get_scope(current_user)
     query = db.query(models.OrderHistory).join(models.Order)
     if scope is not None:
-        query = query.filter(models.Order.admin_id == scope)
+        query = query.filter(models.Order.cafe_id == scope)
     if order_id:
         query = query.filter(models.OrderHistory.order_id == order_id)
     if event_type:
@@ -1147,7 +1147,7 @@ def generate_bill(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    assert_ownership(order.admin_id, current_user)
+    assert_ownership(order.cafe_id, current_user)
     if order.status == "completed":
         raise HTTPException(status_code=400, detail="Bill already settled — order is completed")
     if order.bill:
@@ -1178,7 +1178,7 @@ def get_bill(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    assert_ownership(order.admin_id, current_user)
+    assert_ownership(order.cafe_id, current_user)
     if not order.bill:
         raise HTTPException(status_code=404, detail="No bill found for this order")
     return build_bill_response(order.bill, db)
@@ -1194,7 +1194,7 @@ def pay_bill(
     bill = db.query(models.Bill).filter(models.Bill.id == bill_id).first()
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
-    assert_ownership(bill.order.admin_id, current_user)
+    assert_ownership(bill.order.cafe_id, current_user)
     if bill.is_paid:
         raise HTTPException(status_code=400, detail="Bill is already paid")
 
@@ -1235,7 +1235,7 @@ def get_all_bills(
         .join(models.Order, models.Bill.order_id == models.Order.id)
     )
     if scope is not None:
-        query = query.filter(models.Order.admin_id == scope)
+        query = query.filter(models.Order.cafe_id == scope)
     if is_paid is not None:
         query = query.filter(models.Bill.is_paid == is_paid)
     if date is not None:
@@ -1267,7 +1267,7 @@ def daily_sales_summary(
         )
     )
     if scope is not None:
-        query = query.filter(models.Order.admin_id == scope)
+        query = query.filter(models.Order.cafe_id == scope)
 
     bills = query.order_by(models.Bill.paid_at.asc()).all()
 
@@ -1318,7 +1318,7 @@ def revenue_analytics(
             )
         )
         if scope is not None:
-            q = q.filter(models.Order.admin_id == scope)
+            q = q.filter(models.Order.cafe_id == scope)
         return q.all()
 
     # --- Day: today, hourly breakdown ---
