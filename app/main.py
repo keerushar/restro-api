@@ -6,6 +6,7 @@ from typing import List, Optional
 from jose import jwt, JWTError
 from datetime import datetime, timezone, timedelta, date as date_type
 import calendar
+import os
 
 from . import models, schemas, database, auth
 
@@ -32,9 +33,12 @@ seed_superadmin()
 
 app = FastAPI(title="Restaurant Management System")
 
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+_allowed_origins = ["*"] if _raw_origins.strip() == "*" else [o.strip() for o in _raw_origins.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
