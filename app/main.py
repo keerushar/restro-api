@@ -10,6 +10,10 @@ import os
 
 from . import models, schemas, database, auth
 
+# Verify the database is reachable before doing anything else.
+# This surfaces a clear error in the Railway logs instead of a silent 502.
+database.check_database_connection()
+
 models.Base.metadata.create_all(bind=database.engine)
 
 # Auto-create super_admin on first startup if it doesn't exist
