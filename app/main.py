@@ -37,7 +37,7 @@ seed_superadmin()
 
 app = FastAPI(title="Restaurant Management System")
 
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,https://eatary-admin.vercel.app")
 _allowed_origins = ["*"] if _raw_origins.strip() == "*" else [o.strip() for o in _raw_origins.split(",")]
 
 app.add_middleware(
