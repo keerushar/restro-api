@@ -22,7 +22,7 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/restaurant_db
-      - SECRET_KEY=your-secret-key-change-this-in-production
+      - SECRET_KEY=7055eaa771ae0a5efa5b1436af68fe008ded25bbac83448c34efeccdd132c1cf
     depends_on:
       db:
         condition: service_healthy
