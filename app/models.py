@@ -72,7 +72,7 @@ class ItemRequest(Base):
     __tablename__ = "item_requests"
     id = Column(Integer, primary_key=True, index=True)
     cafe_id = Column(String(36), ForeignKey("cafes.id"), nullable=False)
-    requested_by_id = Column(String(36), ForeignKey("users.id"))
+    requested_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     item_name = Column(String)
     description = Column(String)
     request_count = Column(Integer, default=1)
@@ -96,7 +96,7 @@ class Order(Base):
     table_id = Column(Integer, ForeignKey("tables.id"))
     table_number = Column(Integer)
     table_name = Column(String)
-    staff_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    staff_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     status = Column(String, default="pending")
     total_amount = Column(Float, default=0.0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -140,7 +140,7 @@ class OrderHistory(Base):
     order_id = Column(Integer, ForeignKey("orders.id"))
     event_type = Column(String)
     description = Column(Text, nullable=True)
-    actor_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    actor_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     order = relationship("Order", back_populates="history_events")
 
