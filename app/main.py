@@ -364,6 +364,20 @@ def toggle_cafe_status(
     return cafe
 
 
+@app.delete("/cafes/{cafe_id}")
+def delete_cafe(
+    cafe_id: str,
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(super_admin_only),
+):
+    cafe = db.query(models.Cafe).filter(models.Cafe.id == cafe_id).first()
+    if not cafe:
+        raise HTTPException(status_code=404, detail="Cafe not found")
+    db.delete(cafe)
+    db.commit()
+    return {"msg": "Cafe deleted successfully"}
+
+
 # ============================================================
 # Staff management
 # ============================================================
@@ -1252,6 +1266,66 @@ def get_all_bills(
         query = query.filter(models.Bill.paid_at >= start, models.Bill.paid_at <= end)
     query = query.order_by(models.Bill.paid_at.desc())
     return [build_bill_response(bill, db) for bill in query.all()]
+
+
+@app.get("/staff/{staff_id}/transactions", response_model=List[schemas.StaffTransactionResponse])
+def get_staff_transactions(
+    staff_id: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    # staff can only view their own transactions
+    if current_user.role == models.Role.STAFF:
+        if current_user.id != staff_id:
+            raise HTTPException(status_code=403, detail="Staff can only view their own transactions")
+    elif current_user.role == models.Role.CAFE_ADMIN:
+        # cafe_admin can view any staff in their cafe
+        staff = db.query(models.User).filter(
+            models.User.id == staff_id,
+            models.User.role == models.Role.STAFF,
+        ).first()
+        if not staff:
+            raise HTTPException(status_code=404, detail="Staff not found")
+        assert_ownership(staff.cafe_id, current_user)
+    else:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    bills = (
+        db.query(models.Bill)
+        .join(models.Order, models.Bill.order_id == models.Order.id)
+        .filter(
+            models.Order.staff_id == staff_id,
+            models.Bill.is_paid == True,
+        )
+        .order_by(models.Bill.paid_at.desc())
+        .all()
+    )
+
+    result = []
+    for bill in bills:
+        order = db.query(models.Order).filter(models.Order.id == bill.order_id).first()
+        active_items = [i for i in order.items if i.status != "cancelled"]
+        result.append(schemas.StaffTransactionResponse(
+            bill_id=bill.id,
+            order_id=bill.order_id,
+            table_number=bill.table_number,
+            table_name=bill.table_name,
+            items=[
+                schemas.BillItemResponse(
+                    name=i.name,
+                    quantity=i.quantity,
+                    unit_price=i.price,
+                    amount=round(i.price * i.quantity, 2),
+                )
+                for i in active_items
+            ],
+            total_amount=bill.total_amount,
+            is_paid=bill.is_paid,
+            pay_type=bill.pay_type,
+            paid_at=bill.paid_at,
+            generated_at=bill.generated_at,
+        ))
+    return result
 
 
 @app.get("/bills/daily-summary", response_model=schemas.DailySalesResponse)

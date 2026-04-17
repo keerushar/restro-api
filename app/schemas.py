@@ -294,6 +294,19 @@ class BillResponse(BaseModel):
     paid_at: Optional[datetime] = None
 
 
+class StaffTransactionResponse(BaseModel):
+    bill_id: int
+    order_id: int
+    table_number: int
+    table_name: str
+    items: List[BillItemResponse]
+    total_amount: float
+    is_paid: bool
+    pay_type: Optional[PayType] = None
+    paid_at: Optional[datetime] = None
+    generated_at: datetime
+
+
 class DailySalesResponse(BaseModel):
     date: str
     total_sales: float
