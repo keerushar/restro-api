@@ -65,6 +65,7 @@ class MenuItem(Base):
     cafe_id = Column(String(36), ForeignKey("cafes.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, index=True)
     price = Column(Float)
+    category = Column(String, nullable=True)
     is_available = Column(Boolean, default=True)
 
 
@@ -125,7 +126,7 @@ class OrderItem(Base):
     __tablename__ = "order_items"
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"))
-    menu_item_id = Column(Integer, ForeignKey("menu_items.id"), nullable=True)
+    menu_item_id = Column(Integer, ForeignKey("menu_items.id", ondelete="SET NULL"), nullable=True)
     name = Column(String)
     price = Column(Float)
     quantity = Column(Integer, default=1)

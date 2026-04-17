@@ -348,6 +348,31 @@ def list_cafes(
     return db.query(models.Cafe).all()
 
 
+@app.patch("/cafes/{cafe_id}", response_model=schemas.CafeResponse)
+def update_cafe(
+    cafe_id: str,
+    body: schemas.CafeUpdate,
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(super_admin_only),
+):
+    cafe = db.query(models.Cafe).filter(models.Cafe.id == cafe_id).first()
+    if not cafe:
+        raise HTTPException(status_code=404, detail="Cafe not found")
+    if body.cafe_name is not None:
+        cafe.name = body.cafe_name
+    if body.cafe_username is not None:
+        existing = db.query(models.Cafe).filter(
+            models.Cafe.username == body.cafe_username,
+            models.Cafe.id != cafe_id
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Username already taken")
+        cafe.username = body.cafe_username
+    db.commit()
+    db.refresh(cafe)
+    return cafe
+
+
 @app.patch("/cafes/{cafe_id}/status", response_model=schemas.CafeResponse)
 def toggle_cafe_status(
     cafe_id: str,
@@ -656,8 +681,8 @@ def update_menu_item(
         item.name = item_update.name
     if item_update.price is not None:
         item.price = item_update.price
-    if item_update.is_available is not None:
-        item.is_available = item_update.is_available
+    if item_update.category is not None:
+        item.category = item_update.category
     db.commit()
     db.refresh(item)
     return item
@@ -666,7 +691,7 @@ def update_menu_item(
 @app.patch("/menu-items/{item_id}/availability", response_model=schemas.MenuItemResponse)
 def toggle_menu_item_availability(
     item_id: int,
-    is_available: bool,
+    body: schemas.AvailabilityUpdate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(admin_only),
 ):
@@ -674,7 +699,7 @@ def toggle_menu_item_availability(
     if not item:
         raise HTTPException(status_code=404, detail="Menu item not found")
     assert_ownership(item.cafe_id, current_user)
-    item.is_available = is_available
+    item.is_available = body.is_available
     db.commit()
     db.refresh(item)
     return item
