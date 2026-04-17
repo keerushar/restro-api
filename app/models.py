@@ -36,7 +36,7 @@ class User(Base):
     role = Column(String, nullable=False)  # super_admin | cafe_admin | staff
     is_active = Column(Boolean, default=True)
     # null for super_admin; cafe's id for cafe_admin and staff
-    cafe_id = Column(String(36), ForeignKey("cafes.id"), nullable=True)
+    cafe_id = Column(String(36), ForeignKey("cafes.id", ondelete="CASCADE"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     cafe = relationship("Cafe", back_populates="users", foreign_keys=[cafe_id])
@@ -45,14 +45,14 @@ class User(Base):
 class Floor(Base):
     __tablename__ = "floors"
     id = Column(Integer, primary_key=True, index=True)
-    cafe_id = Column(String(36), ForeignKey("cafes.id"), nullable=False)
+    cafe_id = Column(String(36), ForeignKey("cafes.id", ondelete="CASCADE"), nullable=False)
     name = Column(String)
 
 
 class Table(Base):
     __tablename__ = "tables"
     id = Column(Integer, primary_key=True, index=True)
-    cafe_id = Column(String(36), ForeignKey("cafes.id"), nullable=False)
+    cafe_id = Column(String(36), ForeignKey("cafes.id", ondelete="CASCADE"), nullable=False)
     table_number = Column(Integer)
     table_name = Column(String)
     reservations = relationship("Reservation", back_populates="table", cascade="all, delete-orphan")
@@ -62,16 +62,17 @@ class Table(Base):
 class MenuItem(Base):
     __tablename__ = "menu_items"
     id = Column(Integer, primary_key=True, index=True)
-    cafe_id = Column(String(36), ForeignKey("cafes.id"), nullable=False)
+    cafe_id = Column(String(36), ForeignKey("cafes.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, index=True)
     price = Column(Float)
+    category = Column(String, nullable=True)
     is_available = Column(Boolean, default=True)
 
 
 class ItemRequest(Base):
     __tablename__ = "item_requests"
     id = Column(Integer, primary_key=True, index=True)
-    cafe_id = Column(String(36), ForeignKey("cafes.id"), nullable=False)
+    cafe_id = Column(String(36), ForeignKey("cafes.id", ondelete="CASCADE"), nullable=False)
     requested_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     item_name = Column(String)
     description = Column(String)
@@ -81,7 +82,7 @@ class ItemRequest(Base):
 class Reservation(Base):
     __tablename__ = "reservations"
     id = Column(Integer, primary_key=True, index=True)
-    cafe_id = Column(String(36), ForeignKey("cafes.id"), nullable=False)
+    cafe_id = Column(String(36), ForeignKey("cafes.id", ondelete="CASCADE"), nullable=False)
     table_id = Column(Integer, ForeignKey("tables.id"))
     customer_name = Column(String)
     start_time = Column(DateTime)
@@ -92,7 +93,7 @@ class Reservation(Base):
 class Order(Base):
     __tablename__ = "orders"
     id = Column(Integer, primary_key=True, index=True)
-    cafe_id = Column(String(36), ForeignKey("cafes.id"), nullable=False)
+    cafe_id = Column(String(36), ForeignKey("cafes.id", ondelete="CASCADE"), nullable=False)
     table_id = Column(Integer, ForeignKey("tables.id"))
     table_number = Column(Integer)
     table_name = Column(String)
@@ -125,7 +126,7 @@ class OrderItem(Base):
     __tablename__ = "order_items"
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"))
-    menu_item_id = Column(Integer, ForeignKey("menu_items.id"), nullable=True)
+    menu_item_id = Column(Integer, ForeignKey("menu_items.id", ondelete="SET NULL"), nullable=True)
     name = Column(String)
     price = Column(Float)
     quantity = Column(Integer, default=1)

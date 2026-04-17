@@ -49,8 +49,17 @@ class CafeResponse(BaseModel):
         from_attributes = True
 
 
+class CafeUpdate(BaseModel):
+    cafe_name: Optional[str] = None
+    cafe_username: Optional[str] = None
+
+
 class CafeStatusUpdate(BaseModel):
     is_active: bool
+
+
+class AvailabilityUpdate(BaseModel):
+    is_available: bool
 
 
 class CafeWithAdminResponse(BaseModel):
@@ -142,19 +151,20 @@ class FloorResponse(BaseModel):
 class MenuItemCreate(BaseModel):
     name: str
     price: float
-    is_available: bool = True
+    category: Optional[str] = None
 
 
 class MenuItemUpdate(BaseModel):
     name: Optional[str] = None
     price: Optional[float] = None
-    is_available: Optional[bool] = None
+    category: Optional[str] = None
 
 
 class MenuItemResponse(BaseModel):
     id: int
     name: str
     price: float
+    category: Optional[str] = None
     is_available: bool
 
     class Config:
@@ -292,6 +302,19 @@ class BillResponse(BaseModel):
     pay_type: Optional[PayType] = None
     generated_at: datetime
     paid_at: Optional[datetime] = None
+
+
+class StaffTransactionResponse(BaseModel):
+    bill_id: int
+    order_id: int
+    table_number: int
+    table_name: str
+    items: List[BillItemResponse]
+    total_amount: float
+    is_paid: bool
+    pay_type: Optional[PayType] = None
+    paid_at: Optional[datetime] = None
+    generated_at: datetime
 
 
 class DailySalesResponse(BaseModel):
