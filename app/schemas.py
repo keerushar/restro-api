@@ -216,6 +216,10 @@ class OrderItemStatusUpdate(BaseModel):
     status: ItemStatus
 
 
+class OrderItemQuantityUpdate(BaseModel):
+    quantity: int
+
+
 class OrderItemResponse(BaseModel):
     id: int
     menu_item_id: Optional[int] = None

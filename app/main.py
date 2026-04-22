@@ -37,7 +37,7 @@ seed_superadmin()
 
 app = FastAPI(title="Restaurant Management System")
 
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,https://eatary-admin.vercel.app")
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,https://eatary-admin.vercel.app,http://localhost:3002")
 _allowed_origins = ["*"] if _raw_origins.strip() == "*" else [o.strip() for o in _raw_origins.split(",")]
 
 app.add_middleware(
@@ -100,13 +100,14 @@ def build_bill_response(bill: models.Bill, db: Session) -> schemas.BillResponse:
         )
         for item in active_items
     ]
+    calculated_total = round(sum(item.amount for item in bill_items), 2)
     return schemas.BillResponse(
         id=bill.id,
         order_id=bill.order_id,
         table_number=bill.table_number,
         table_name=bill.table_name,
         items=bill_items,
-        total_amount=bill.total_amount,
+        total_amount=calculated_total,
         is_paid=bill.is_paid,
         pay_type=bill.pay_type,
         generated_at=bill.generated_at,
@@ -1050,6 +1051,40 @@ def update_item_status(
     order_item.status = body.status.value
     log_history(db, order.id, "item_status_changed",
                 f"'{order_item.name}' status: {old_status} → {body.status.value}",
+                actor_id=current_user.id)
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+@app.patch("/orders/{order_id}/items/{item_id}", response_model=schemas.OrderResponse)
+def update_item_quantity(
+    order_id: int,
+    item_id: int,
+    body: schemas.OrderItemQuantityUpdate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(staff_only),
+):
+    if body.quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+
+    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    assert_ownership(order.cafe_id, current_user)
+
+    order_item = db.query(models.OrderItem).filter(
+        models.OrderItem.id == item_id,
+        models.OrderItem.order_id == order_id,
+    ).first()
+    if not order_item:
+        raise HTTPException(status_code=404, detail="Order item not found")
+
+    old_qty = order_item.quantity
+    order_item.quantity = body.quantity
+    recalculate_total(order)
+    log_history(db, order.id, "item_quantity_changed",
+                f"'{order_item.name}' quantity: {old_qty} → {body.quantity}",
                 actor_id=current_user.id)
     db.commit()
     db.refresh(order)
