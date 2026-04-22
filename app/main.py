@@ -304,6 +304,45 @@ def login_alias(
 
 
 # ============================================================
+# Admin — database management (super_admin only)
+# ============================================================
+
+import logging as _logging
+_reset_logger = _logging.getLogger("reset_db")
+
+
+@app.post("/admin/reset-db", tags=["Admin"])
+def reset_database(
+    current_user: models.User = Depends(super_admin_only),
+):
+    """
+    **Danger zone** — drops every table and recreates the schema from scratch.
+    All data will be permanently lost.  Requires super_admin credentials.
+    The super_admin account is re-seeded automatically after the reset.
+    """
+    _reset_logger.warning(
+        "Database reset initiated by user '%s' (id=%s).",
+        current_user.username,
+        current_user.id,
+    )
+
+    models.Base.metadata.drop_all(bind=database.engine)
+    _reset_logger.info("All tables dropped.")
+
+    models.Base.metadata.create_all(bind=database.engine)
+    _reset_logger.info("All tables recreated.")
+
+    # Re-seed the super_admin so the system is immediately usable.
+    seed_superadmin()
+    _reset_logger.info("Super-admin re-seeded. Database reset complete.")
+
+    return {
+        "message": "Database reset successful. All tables have been dropped and recreated.",
+        "tables": sorted(models.Base.metadata.tables.keys()),
+    }
+
+
+# ============================================================
 # Staff management (admin sees their own staff)
 # ============================================================
 
